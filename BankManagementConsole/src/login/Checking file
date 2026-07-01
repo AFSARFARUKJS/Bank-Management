@@ -1,0 +1,64 @@
+package login;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+public class StoryCheck {
+    private static int passed = 0;
+
+    public static void main(String[] args) {
+        BankService bank = new BankService();
+        LoginService login = bank.getLoginService();
+
+        User admin = login.login("admin", "Admin@123");
+        check(admin != null && admin.getRole() == Role.ADMIN && admin.getLastLogin() != null, "US01 admin login and last login");
+        User employee = login.login("employee1", "Emp@1234");
+        check(employee != null && employee.getRole() == Role.EMPLOYEE, "US02 employee dashboard role");
+        User customer = login.login("johncustomer", "John@123");
+        check(customer != null && customer.getRole() == Role.CUSTOMER, "US02 customer dashboard role");
+
+        check(login.validateLoginApi("missing", "x").contains("does not exist"), "US04 login API user existence");
+        check(login.validateLoginApi("admin", "Admin@123").equals("Login successful."), "US04 login API success string");
+        check(login.roleBasedAccessApi(Role.ADMIN).contains("ADMIN permissions"), "US05 role access API");
+        check(login.roleBasedAccessApi(null).contains("Access denied"), "US05 invalid role denied");
+        check(!login.hasRole(customer, Role.ADMIN), "US05 invalid role access logged");
+
+        check(login.resetPassword("johncustomer", "bad", "New@1234", "New@1234").contains("old password"), "US03 old password check");
+        check(login.resetPassword("johncustomer", "John@123", "John@123", "John@123").contains("different"), "US03 new password different");
+        check(login.resetPassword("johncustomer", "John@123", "New@1234", "Wrong@123").contains("confirm"), "US03 confirm password");
+        check(login.resetPassword("johncustomer", "John@123", "New@1234", "New@1234").contains("successful"), "US03 reset success");
+
+        check(bank.createCustomer(employee, "bad user", "Pass@123", "Bad", "User", "bad@example.com", "8888888888", "123456789012", "A", "City", "State", "1", true).contains("Username"), "US06 username validation");
+        check(bank.createCustomer(employee, "newcustomer", "New@1234", "New", "Customer", "new@example.com", "8888888888", "222222222222", "A", "Mumbai", "MH", "400001", true).contains("Customer created"), "US06/US09 create customer");
+        check(bank.createCustomer(employee, "newcustomer2", "New@1234", "New", "Customer", "new@example.com", "7777777777", "333333333333", "A", "Mumbai", "MH", "400001", true).contains("Duplicate"), "US09 duplicate email");
+        check(bank.updateCustomer(employee, 1002, "New", "Edited", "edited@example.com", "7777777777", "B", "Pune", "MH", "411001", true).contains("Username, SSN"), "US07/US10 update customer immutable fields");
+        bank.searchCustomers("New", "", "active", "Pune");
+        check(bank.findCustomer(1002).isPresent(), "US08 search/filter callable");
+
+        check(bank.createAccount(employee, 1002, AccountType.CURRENT, new BigDecimal("1000"), BigDecimal.ZERO).contains("Minimum"), "US12 current minimum balance");
+        check(bank.createAccount(employee, 1002, AccountType.SAVINGS, new BigDecimal("1000"), BigDecimal.ZERO).contains("Account created"), "US12/US15 savings account create");
+        check(BankService.maskAccount(10000001).equals("****0001"), "US13 account masking");
+        check(bank.updateAccountStatus(employee, 10000002, AccountStatus.FROZEN).contains("Balance must be zero"), "US14 freeze requires zero balance");
+        check(bank.createAccount(employee, 1002, AccountType.FIXED_DEPOSIT, BigDecimal.ZERO, new BigDecimal("6.5")).contains("Account created"), "US12 FD account create");
+        check(bank.updateAccountStatus(employee, 10000003, AccountStatus.FROZEN).contains("FROZEN"), "US16 status update success");
+
+        check(bank.transfer(customer, 10000001, 10000002, new BigDecimal("100")).contains("Transfer successful"), "US17/US19 transfer success");
+        check(bank.transfer(customer, 10000001, 10000002, new BigDecimal("60000")).contains("limit"), "US17 transfer limit");
+        check(bank.transfer(customer, 10000002, 10000001, new BigDecimal("10")).contains("own account"), "US19 ownership validation");
+        check(bank.withdraw(employee, 10000001, new BigDecimal("999999")).contains("minimum balance"), "US19 min balance failure");
+        bank.transactionHistory(customer, LocalDate.now(), BigDecimal.ZERO, new BigDecimal("100000"));
+        check(!bank.getTransactions().isEmpty(), "US18/US20 transaction history data exists");
+
+        check(bank.softDeleteCustomer(employee, 1002).contains("soft deleted"), "US11 soft delete active customer");
+        check(bank.softDeleteCustomer(employee, 1002).contains("Only active"), "US11 reject inactive customer delete");
+        check(bank.getLogger().getAuditLogs().size() > 0, "Audit logs created");
+
+        System.out.println("ALL STORY CHECKS PASSED: " + passed);
+    }
+
+    private static void check(boolean condition, String name) {
+        if (!condition) throw new IllegalStateException("FAILED: " + name);
+        passed++;
+        System.out.println("PASSED: " + name);
+    }
+}
